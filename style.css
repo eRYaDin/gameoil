@@ -347,3 +347,132 @@ html,body{
 @keyframes px-blink{0%,100%{opacity:1;}50%{opacity:0;}}
 @keyframes lvl-pop{from{transform:scale(0.4);}to{transform:scale(1.05);}}
 @keyframes lvl-fade{from{opacity:1;}to{opacity:0;}}
+
+/* ══════════════════════════
+   BARTER OVERLAY (Chaos)
+══════════════════════════ */
+#barter-overlay{
+  position:fixed;inset:0;background:rgba(5,5,15,0.96);
+  display:flex;align-items:center;justify-content:center;
+  z-index:400;animation:px-fade .2s steps(3) forwards;
+}
+#barter-overlay.hidden{display:none;}
+
+#barter-box{
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+  width:min(98vw,960px);max-height:95vh;overflow-y:auto;
+  padding:22px 18px;
+  background:var(--panel);
+  border:4px solid var(--orange);
+  box-shadow:6px 6px 0 var(--orange),14px 14px 0 rgba(255,140,0,0.15);
+}
+
+.barter-title{
+  font-size:20px;color:var(--orange);
+  text-shadow:4px 4px 0 #552200,0 0 20px var(--orange);
+  letter-spacing:4px;animation:none;
+}
+
+#barter-sub{
+  font-size:8px;color:var(--dim);letter-spacing:2px;
+}
+
+.barter-warning{
+  font-size:7px;color:var(--red);letter-spacing:1px;
+  border:2px solid var(--red);padding:4px 10px;
+  animation:px-blink .8s step-end infinite;
+}
+
+#barter-cards-wrap{
+  display:flex;gap:14px;width:100%;flex-wrap:wrap;justify-content:center;
+}
+
+/* Skip option */
+.barter-option{
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  padding:18px 14px;background:var(--dark);
+  cursor:pointer;
+  transition:transform .1s steps(2),box-shadow .1s steps(2);
+}
+.skip-option{
+  flex:0 0 140px;min-width:120px;
+  border:3px solid #22ff88;box-shadow:4px 4px 0 #22ff88;
+}
+.skip-option:hover{transform:translate(-2px,-2px);box-shadow:6px 6px 0 #22ff88;}
+.skip-option:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #22ff88;}
+
+.barter-opt-icon{font-size:28px;}
+.barter-opt-name{font-size:11px;color:#22ff88;letter-spacing:2px;}
+.barter-opt-desc{font-size:7px;color:#aabbcc;text-align:center;line-height:1.8;}
+.barter-opt-tag{font-size:6px;letter-spacing:2px;padding:2px 6px;background:#111;border:2px solid;}
+
+/* Right panel (upgrade + penalty) */
+#barter-right{
+  flex:1;min-width:500px;display:flex;flex-direction:column;gap:10px;
+  background:rgba(255,60,0,0.05);
+  border:2px solid #553300;padding:12px;
+}
+.barter-right-header{
+  font-size:9px;color:var(--orange);letter-spacing:2px;text-align:center;
+}
+.barter-sub-label{font-size:7px;color:var(--dim);letter-spacing:1px;}
+.barter-divider{
+  font-size:7px;color:var(--red);letter-spacing:2px;text-align:center;
+  border-top:1px solid #553300;border-bottom:1px solid #553300;
+  padding:4px 0;margin:2px 0;
+}
+
+#barter-upgrade-cards,#barter-penalty-cards{
+  display:flex;gap:8px;flex-wrap:wrap;justify-content:center;
+}
+
+/* Barter upgrade cards (smaller) */
+.barter-upg-card{
+  flex:1;min-width:110px;max-width:150px;
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  padding:10px 8px;background:var(--dark);
+  border:2px solid var(--card-color,#4aeeff);
+  box-shadow:3px 3px 0 var(--card-color,#4aeeff);
+  cursor:pointer;transition:transform .1s steps(2),box-shadow .1s steps(2);
+}
+.barter-upg-card:hover{transform:translate(-2px,-2px);box-shadow:5px 5px 0 var(--card-color,#4aeeff);}
+.barter-upg-card:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--card-color,#4aeeff);}
+.barter-upg-card.selected{
+  border-width:3px;
+  box-shadow:5px 5px 0 var(--card-color,#4aeeff);
+  background:#1e2a3a;
+}
+.barter-upg-card.dimmed{opacity:0.35;pointer-events:none;}
+
+/* Penalty cards */
+.barter-pen-card{
+  flex:1;min-width:110px;max-width:150px;
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  padding:10px 8px;background:var(--dark);
+  border:2px solid var(--pen-color,#ff2255);
+  box-shadow:3px 3px 0 var(--pen-color,#ff2255);
+  cursor:pointer;transition:transform .1s steps(2),box-shadow .1s steps(2);
+  opacity:0.5;
+}
+.barter-pen-card.active{opacity:1;cursor:pointer;}
+.barter-pen-card.active:hover{transform:translate(-2px,-2px);box-shadow:5px 5px 0 var(--pen-color,#ff2255);}
+.barter-pen-card.selected{border-width:3px;box-shadow:5px 5px 0 var(--pen-color,#ff2255);background:#2a1010;}
+
+.barter-pen-name{font-size:7px;color:var(--pen-color,#ff2255);text-align:center;letter-spacing:1px;line-height:1.5;}
+.barter-pen-desc{font-size:6px;color:#cc9988;text-align:center;line-height:1.7;}
+.barter-pen-cur{font-size:6px;color:#886655;text-align:center;}
+
+/* Confirm button (appears after both selected) */
+#barter-confirm{
+  display:none;
+  font-family:var(--px);font-size:9px;letter-spacing:2px;
+  background:var(--dark);border:3px solid var(--orange);
+  color:var(--orange);padding:8px 18px;cursor:pointer;
+  box-shadow:3px 3px 0 var(--orange);margin-top:4px;align-self:center;
+  transition:transform .1s steps(2),box-shadow .1s steps(2);
+}
+#barter-confirm:hover{transform:translate(-2px,-2px);box-shadow:5px 5px 0 var(--orange);}
+#barter-confirm:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--orange);}
+
+/* Enemy power HUD pill chaos glow */
+#chaos-power-pill{animation:px-blink 1.5s step-end infinite;}
