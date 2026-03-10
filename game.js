@@ -22,10 +22,6 @@ const BOSS_HP_BASE   = 20;
 
 // Enemy base HP (both modes start at 3)
 const ENEMY_HP_BASE     = 3;
-// Chaos: enemy scales every 5 rounds
-const CHAOS_HP_PER_5    = 1;     // +1 HP every 5 rounds
-const CHAOS_MOV_PER_5   = 0.10;  // +10% move speed every 5 rounds
-const CHAOS_ATK_PER_5   = 0.10;  // +10% attack speed every 5 rounds
 // Chaos upgrade choices
 const CHAOS_UPGRADE_CHOICES = 6;
 // Barter: every 3 rounds in chaos
@@ -33,11 +29,12 @@ const CHAOS_BARTER_EVERY = 3;
 
 // ─── BARTER PENALTY DATABASE ─────────────────────────
 const BARTER_PENALTIES = [
-  { id:'penHp',    name:'ARMOR UP',    icon:'🛡', desc:'Semua musuh +1 darah',           color:'#ff2255', apply:(es)=>{ es.chaosHpBonus=(es.chaosHpBonus||0)+1; } },
-  { id:'penMov',   name:'TURBO',       icon:'💨', desc:'Musuh gerak +15% lebih cepat',   color:'#ff8800', apply:(es)=>{ es.chaosMovBonus=(es.chaosMovBonus||0)+0.15; } },
-  { id:'penShot',  name:'RAPID FIRE',  icon:'🔫', desc:'Musuh tembak +20% lebih cepat',  color:'#ff4444', apply:(es)=>{ es.chaosShotBonus=(es.chaosShotBonus||0)+0.20; } },
-  { id:'penSpawn', name:'SWARM',       icon:'🐝', desc:'+1 musuh tambahan per ronde',     color:'#ffaa00', apply:(es)=>{ es.chaosSpawnBonus=(es.chaosSpawnBonus||0)+1; } },
-  { id:'penSpread',name:'OIL SURGE',   icon:'🌊', desc:'Oil menyebar +5% lebih cepat',   color:'#cc8800', apply:(es)=>{ es.chaosSpreadBonus=(es.chaosSpreadBonus||0)+0.05; } },
+  { id:'penHp',     name:'ARMOR UP',     icon:'🛡', desc:'Semua musuh +1 darah',           color:'#ff2255', apply:(es)=>{ es.chaosHpBonus=(es.chaosHpBonus||0)+1; } },
+  { id:'penMov',    name:'TURBO',        icon:'💨', desc:'Musuh gerak +15% lebih cepat',   color:'#ff8800', apply:(es)=>{ es.chaosMovBonus=(es.chaosMovBonus||0)+0.15; } },
+  { id:'penShot',   name:'RAPID FIRE',   icon:'🔫', desc:'Musuh tembak +25% lebih cepat',  color:'#ff4444', apply:(es)=>{ es.chaosShotBonus=(es.chaosShotBonus||0)+0.25; } },
+  { id:'penSpawn',  name:'SWARM',        icon:'🐝', desc:'+1 musuh tambahan per ronde',     color:'#ffaa00', apply:(es)=>{ es.chaosSpawnBonus=(es.chaosSpawnBonus||0)+1; } },
+  { id:'penOilSpd', name:'OIL SURGE',    icon:'🌊', desc:'Oil menyebar +5% lebih cepat',   color:'#cc8800', apply:(es)=>{ es.chaosOilBonus=(es.chaosOilBonus||0)+0.05; } },
+  { id:'penSpread', name:'SPREAD SHOT',  icon:'💥', desc:'Musuh tembak 3 peluru sekarang', color:'#ff0066', apply:(es)=>{ es.chaosSpreadShot=true; } },
 ];
 
 // ─── UPGRADE DATABASE ────────────────────────────────
@@ -145,7 +142,7 @@ class Game{
     // Chaos enemy scaling
     this.enemyStats = {
       chaosHpBonus:0, chaosMovBonus:0, chaosShotBonus:0,
-      chaosSpawnBonus:0, chaosSpreadBonus:0,
+      chaosSpawnBonus:0, chaosOilBonus:0, chaosSpreadShot:false,
     };
 
     // Barter state
@@ -184,7 +181,7 @@ class Game{
   get spreadCh()  {
     if(this.isSandbox) return Math.min(0.5, (this.sb.oilSpread??12)/100);
     const base = Math.max(0.01, BASE_SPREAD_CH - this.upgrades.slowSpread*0.02);
-    return this.isChaos ? Math.min(0.5, base + (this.enemyStats.chaosSpreadBonus||0)) : base;
+    return this.isChaos ? Math.min(0.5, base + (this.enemyStats.chaosOilBonus||0)) : base;
   }
   get bulletSpd() {
     if(this.isSandbox) return this.sb.playerBulletSpeed??1.8;
@@ -199,25 +196,22 @@ class Game{
     return Math.max(80, 250 * (1 - this.upgrades.rapidFire*0.3));
   }
 
-  // ── Enemy stats ─────────────────────────────────
-  get chaosTier() { return this.isChaos ? Math.floor((this.level-1)/5) : 0; }
+  // ── Enemy stats — Chaos scales ONLY via barter ──
   get enemyBaseHp(){
     if(this.isSandbox) return this.sb.enemyHp??3;
-    if(!this.isChaos)  return ENEMY_HP_BASE;
-    return ENEMY_HP_BASE + this.chaosTier*CHAOS_HP_PER_5 + (this.enemyStats.chaosHpBonus||0);
+    // Base 3 HP, +1 per barter penalty chosen
+    return ENEMY_HP_BASE + (this.enemyStats.chaosHpBonus||0);
   }
   get enemyMoveInterval(){
     if(this.isSandbox) return Math.max(50, Math.round(500/(this.sb.enemySpeed??1)));
-    const tierBonus   = this.chaosTier * CHAOS_MOV_PER_5;
     const barterBonus = this.isChaos ? (this.enemyStats.chaosMovBonus||0) : 0;
-    return Math.max(80, Math.round(500 / (1 + tierBonus + barterBonus)));
+    return Math.max(80, Math.round(500 / (1 + barterBonus)));
   }
   get enemyShootInterval(){
     if(this.isSandbox) return Math.max(200, Math.round(1500/(this.sb.enemyFireRate??1)));
     const base        = this.isChaos ? 1000 : 1500;
-    const tierBonus   = this.chaosTier * CHAOS_ATK_PER_5;
     const barterBonus = this.isChaos ? (this.enemyStats.chaosShotBonus||0) : 0;
-    return Math.max(250, Math.round(base / (1 + tierBonus + barterBonus)));
+    return Math.max(250, Math.round(base / (1 + barterBonus)));
   }
   get enemyStartLevel(){
     if(this.isSandbox) return this.sb.enemyStartLevel??1;
@@ -226,12 +220,14 @@ class Game{
   get bossBaseHp(){ return BOSS_HP_BASE*(this.level/10)*(this.isChaos?1.5:1); }
   get upgradeChoiceCount(){ return this.isChaos ? CHAOS_UPGRADE_CHOICES : 3; }
   get enemyPowerLabel(){
-    const t=this.chaosTier, extra=[];
-    if((this.enemyStats.chaosHpBonus||0)>0)    extra.push(`+${this.enemyStats.chaosHpBonus}HP`);
-    if((this.enemyStats.chaosMovBonus||0)>0)   extra.push(`+${Math.round(this.enemyStats.chaosMovBonus*100)}%MOV`);
-    if((this.enemyStats.chaosShotBonus||0)>0)  extra.push(`+${Math.round(this.enemyStats.chaosShotBonus*100)}%ATK`);
-    if((this.enemyStats.chaosSpawnBonus||0)>0) extra.push(`+${this.enemyStats.chaosSpawnBonus}SPAWN`);
-    return `T${t}${extra.length?' ['+extra.join(' ')+']':''}`;
+    const es=this.enemyStats, parts=[];
+    if((es.chaosHpBonus||0)>0)    parts.push(`+${es.chaosHpBonus}HP`);
+    if((es.chaosMovBonus||0)>0)   parts.push(`+${Math.round(es.chaosMovBonus*100)}%MOV`);
+    if((es.chaosShotBonus||0)>0)  parts.push(`+${Math.round(es.chaosShotBonus*100)}%ATK`);
+    if((es.chaosSpawnBonus||0)>0) parts.push(`+${es.chaosSpawnBonus}SPAWN`);
+    if(es.chaosSpreadShot)         parts.push(`SPREAD`);
+    if((es.chaosOilBonus||0)>0)   parts.push(`+${Math.round(es.chaosOilBonus*100)}%OIL`);
+    return parts.length ? parts.join(' ') : 'BASE';
   }
 
   // ── Build water background ───────────────────────
@@ -469,20 +465,21 @@ class Game{
     if(!this.enemies.length||this.gameOver||this.paused) return;
     if(now-this.lastEShotMs<this.enemyShootInterval) return;
     this.lastEShotMs=now;
-    // Enemy bullet speed fixed at 0.77 (= 1.1 × 0.7), NOT affected by player upgrades
-    const esp = this._sandboxEnemyBspeed ?? 0.77;
+    // Enemy bullet speed: fixed 0.77, NOT affected by player upgrades
+    const esp = (this.isSandbox ? (this.sb.enemyBulletSpeed??0.77) : 0.77);
+    // Spread shot only if barter penalty was selected
+    const doSpread = this.isChaos && !!this.enemyStats.chaosSpreadShot;
     for(const e of this.enemies){
-      const dR=this.pr-e.r,dC=this.pc-e.c;
-      let dr=0,dc=0;
-      if(Math.abs(dR)>=Math.abs(dC))dr=Math.sign(dR);else dc=Math.sign(dC);
-      if(!dr&&!dc)dr=1;
-      this.bullets.push(new Bullet(e.r+Math.floor(ENEMY_CELLS/2),e.c+Math.floor(ENEMY_CELLS/2),dr,dc,false,esp));
-      // Chaos level 5+: 2 extra spread bullets only (never triple)
-      if(this.isChaos&&this.level>=5){
+      const dR=this.pr-e.r, dC=this.pc-e.c;
+      let dr=0, dc=0;
+      if(Math.abs(dR)>=Math.abs(dC)) dr=Math.sign(dR); else dc=Math.sign(dC);
+      if(!dr&&!dc) dr=1;
+      this.bullets.push(new Bullet(e.r+Math.floor(ENEMY_CELLS/2), e.c+Math.floor(ENEMY_CELLS/2), dr, dc, false, esp));
+      if(doSpread){
         const ang=Math.atan2(dR,dC);
-        for(const da of[-0.25,0.25])
-          this.bullets.push(new Bullet(e.r+Math.floor(ENEMY_CELLS/2),e.c+Math.floor(ENEMY_CELLS/2),
-            Math.sin(ang+da),Math.cos(ang+da),false,esp*0.9));
+        for(const da of[-0.28,0.28])
+          this.bullets.push(new Bullet(e.r+Math.floor(ENEMY_CELLS/2), e.c+Math.floor(ENEMY_CELLS/2),
+            Math.sin(ang+da), Math.cos(ang+da), false, esp*0.85));
       }
     }
   }
@@ -827,11 +824,12 @@ class Game{
 
   _getPenaltyCurrentStr(id){
     const es = this.enemyStats;
-    if(id==='penHp')    return `HP musuh: ${this.enemyBaseHp} → ${this.enemyBaseHp+1}`;
-    if(id==='penMov')   return `Mov bonus: +${Math.round((es.chaosMovBonus||0)*100)}% → +${Math.round(((es.chaosMovBonus||0)+0.15)*100)}%`;
-    if(id==='penShot')  return `Atk bonus: +${Math.round((es.chaosShotBonus||0)*100)}% → +${Math.round(((es.chaosShotBonus||0)+0.20)*100)}%`;
-    if(id==='penSpawn') return `Spawn bonus: +${es.chaosSpawnBonus||0} → +${(es.chaosSpawnBonus||0)+1}`;
-    if(id==='penSpread')return `Oil spread: +${Math.round((es.chaosSpreadBonus||0)*100)}% → +${Math.round(((es.chaosSpreadBonus||0)+0.05)*100)}%`;
+    if(id==='penHp')     return `HP musuh: ${this.enemyBaseHp} → ${this.enemyBaseHp+1}`;
+    if(id==='penMov')    return `Mov: +${Math.round((es.chaosMovBonus||0)*100)}% → +${Math.round(((es.chaosMovBonus||0)+0.15)*100)}%`;
+    if(id==='penShot')   return `Atk: +${Math.round((es.chaosShotBonus||0)*100)}% → +${Math.round(((es.chaosShotBonus||0)+0.25)*100)}%`;
+    if(id==='penSpawn')  return `Spawn: +${es.chaosSpawnBonus||0} → +${(es.chaosSpawnBonus||0)+1}`;
+    if(id==='penOilSpd') return `Oil: +${Math.round((es.chaosOilBonus||0)*100)}% → +${Math.round(((es.chaosOilBonus||0)+0.05)*100)}%`;
+    if(id==='penSpread') return es.chaosSpreadShot ? 'Sudah aktif!' : 'Belum aktif → AKTIF';
     return '';
   }
 
@@ -1255,7 +1253,7 @@ class Game{
     $('upgrade-overlay').classList.add('hidden');
     $('barter-overlay').classList.add('hidden');
     for(const k of Object.keys(this.upgrades))this.upgrades[k]=0;
-    this.enemyStats={chaosHpBonus:0,chaosMovBonus:0,chaosShotBonus:0,chaosSpawnBonus:0,chaosSpreadBonus:0};
+    this.enemyStats={chaosHpBonus:0,chaosMovBonus:0,chaosShotBonus:0,chaosSpawnBonus:0,chaosOilBonus:0,chaosSpreadShot:false};
     this.level=1;this._init();
   }
   backToMenu(){
