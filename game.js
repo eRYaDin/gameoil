@@ -108,8 +108,9 @@ class HealOrb{
 //  GAME
 // ══════════════════════════════════════════════════════
 class Game{
-  constructor(mode){
-    this.mode   = mode;   // 'normal' | 'chaos'
+  constructor(mode, sandboxCfg=null){
+    this.mode   = mode;   // 'normal' | 'chaos' | 'sandbox'
+    this.sbCfg  = sandboxCfg; // null unless sandbox
     this.canvas = $('gc');
     this.ctx    = this.canvas.getContext('2d');
     this.canvas.width  = W;
@@ -122,6 +123,16 @@ class Game{
     this.upgrades = {};
     for(const u of UPGRADE_DB) this.upgrades[u.id]=0;
 
+    // Sandbox: pre-apply upgrade choices
+    if(mode==='sandbox' && sandboxCfg){
+      if(sandboxCfg.doubleShot) this.upgrades.doubleShot=1;
+      if(sandboxCfg.tripleShot){ this.upgrades.doubleShot=1; this.upgrades.tripleShot=1; }
+      if(sandboxCfg.rapidFire>0)  this.upgrades.rapidFire=sandboxCfg.rapidFire;
+      if(sandboxCfg.extraHp>0)    this.upgrades.extraHp=sandboxCfg.extraHp;
+      // Expose enemy bullet speed for _enemyShoot
+      this._sandboxEnemyBspeed = sandboxCfg.enemyBulletSpeed;
+    }
+
     // Roll skill state (Normal only)
     this.rollUsedMs  = -999999;
     this.rollCd      = 20000;
@@ -131,20 +142,16 @@ class Game{
     this._chaosBonusPending = false;
     this._chaosBonusUpgrade = null;
 
-    // Chaos enemy scaling (accumulates via barter + periodic)
-    // These are the "enemy stats" object used by _spawnEnemies etc.
+    // Chaos enemy scaling
     this.enemyStats = {
-      chaosHpBonus:     0,  // extra HP added via barter penalty
-      chaosMovBonus:    0,  // move speed multiplier bonus (0.1 = 10%)
-      chaosShotBonus:   0,  // attack speed multiplier bonus
-      chaosSpawnBonus:  0,  // extra enemies per wave
-      chaosSpreadBonus: 0,  // extra oil spread chance
+      chaosHpBonus:0, chaosMovBonus:0, chaosShotBonus:0,
+      chaosSpawnBonus:0, chaosSpreadBonus:0,
     };
 
     // Barter state
-    this._barterPending        = false;
-    this._barterChosenUpgrade  = null;
-    this._barterChosenPenalty  = null;
+    this._barterPending       = false;
+    this._barterChosenUpgrade = null;
+    this._barterChosenPenalty = null;
 
     this._buildWaterSnap();
     this._bindInput();
@@ -154,51 +161,75 @@ class Game{
   }
 
   // ── Derived stats ────────────────────────────────
-  get isChaos()    { return this.mode==='chaos'; }
-  get skillCCd()   { return Math.max(2000, 10000 - this.upgrades.cooldownReduction*200); }
-  get skillArea()  { return (10+Math.floor((this.level-1)/2)) + this.upgrades.areaExpansion*2 + this.upgrades.oilVacuum; }
-  get skillVDur()  { return 3000 + this.upgrades.boostDuration*1000; }
-  get skillVCd()   { return Math.max(5000, 15000 - this.upgrades.boostCooldown*2000); }
-  get spreadCh()   {
+  get isChaos()   { return this.mode==='chaos'; }
+  get isSandbox() { return this.mode==='sandbox'; }
+  get sb()        { return this.sbCfg || {}; }
+
+  get skillCCd()  {
+    if(this.isSandbox) return Math.max(500, (this.sb.areaCooldown??10)*1000);
+    return Math.max(2000, 10000 - this.upgrades.cooldownReduction*200);
+  }
+  get skillArea() {
+    if(this.isSandbox) return this.sb.areaRadius??12;
+    return (10+Math.floor((this.level-1)/2)) + this.upgrades.areaExpansion*2 + this.upgrades.oilVacuum;
+  }
+  get skillVDur() {
+    if(this.isSandbox) return (this.sb.boostDuration??3)*1000;
+    return 3000 + this.upgrades.boostDuration*1000;
+  }
+  get skillVCd()  {
+    if(this.isSandbox) return Math.max(500,(this.sb.boostCooldown??15)*1000);
+    return Math.max(5000, 15000 - this.upgrades.boostCooldown*2000);
+  }
+  get spreadCh()  {
+    if(this.isSandbox) return Math.min(0.5, (this.sb.oilSpread??12)/100);
     const base = Math.max(0.01, BASE_SPREAD_CH - this.upgrades.slowSpread*0.02);
     return this.isChaos ? Math.min(0.5, base + (this.enemyStats.chaosSpreadBonus||0)) : base;
   }
-  get bulletSpd()  { return 1.8 * (1 + this.upgrades.bulletSpeed*0.3); }
-  get movDelay()   { return Math.max(10, Math.round(35 / (1 + this.upgrades.moveSpeed*0.15))); }
-  get shootCd()    { return Math.max(80, 250 * (1 - this.upgrades.rapidFire*0.3)); }
+  get bulletSpd() {
+    if(this.isSandbox) return this.sb.playerBulletSpeed??1.8;
+    return 1.8 * (1 + this.upgrades.bulletSpeed*0.3);
+  }
+  get movDelay()  {
+    if(this.isSandbox) return Math.max(5, Math.round(35 / (this.sb.playerSpeed??1)));
+    return Math.max(10, Math.round(35 / (1 + this.upgrades.moveSpeed*0.15)));
+  }
+  get shootCd()   {
+    if(this.isSandbox) return Math.max(50, (this.sb.playerShootCd??0.25)*1000);
+    return Math.max(80, 250 * (1 - this.upgrades.rapidFire*0.3));
+  }
 
-  // ── Chaos enemy derived stats ────────────────────
-  // Periodic scaling tier (every 5 levels in chaos)
-  get chaosTier()      { return this.isChaos ? Math.floor((this.level-1)/5) : 0; }
-  // Enemy HP: both modes base = 3 flat; chaos adds tier scaling + barter bonus on top
-  get enemyBaseHp()    {
-    if(!this.isChaos) return ENEMY_HP_BASE;  // Normal: always 3, no scaling
+  // ── Enemy stats ─────────────────────────────────
+  get chaosTier() { return this.isChaos ? Math.floor((this.level-1)/5) : 0; }
+  get enemyBaseHp(){
+    if(this.isSandbox) return this.sb.enemyHp??3;
+    if(!this.isChaos)  return ENEMY_HP_BASE;
     return ENEMY_HP_BASE + this.chaosTier*CHAOS_HP_PER_5 + (this.enemyStats.chaosHpBonus||0);
   }
-  // Enemy move interval (ms lower = faster). Base 500ms, -10% per tier, - barter bonus
-  get enemyMoveInterval() {
-    const base = this.isChaos ? 500 : 500;
-    const tierBonus = this.chaosTier * CHAOS_MOV_PER_5;
+  get enemyMoveInterval(){
+    if(this.isSandbox) return Math.max(50, Math.round(500/(this.sb.enemySpeed??1)));
+    const tierBonus   = this.chaosTier * CHAOS_MOV_PER_5;
     const barterBonus = this.isChaos ? (this.enemyStats.chaosMovBonus||0) : 0;
-    return Math.max(80, Math.round(base / (1 + tierBonus + barterBonus)));
+    return Math.max(80, Math.round(500 / (1 + tierBonus + barterBonus)));
   }
-  // Enemy shoot interval (ms). Base 1500/1000, -10% per tier
-  get enemyShootInterval() {
-    const base = this.isChaos ? 1000 : 1500;
-    const tierBonus = this.chaosTier * CHAOS_ATK_PER_5;
+  get enemyShootInterval(){
+    if(this.isSandbox) return Math.max(200, Math.round(1500/(this.sb.enemyFireRate??1)));
+    const base        = this.isChaos ? 1000 : 1500;
+    const tierBonus   = this.chaosTier * CHAOS_ATK_PER_5;
     const barterBonus = this.isChaos ? (this.enemyStats.chaosShotBonus||0) : 0;
     return Math.max(250, Math.round(base / (1 + tierBonus + barterBonus)));
   }
-  get bossBaseHp()     { return BOSS_HP_BASE*(this.level/10)*(this.isChaos?1.5:1); }
-  get enemyStartLevel(){ return this.isChaos?1:5; }
-  get upgradeChoiceCount(){ return this.isChaos?CHAOS_UPGRADE_CHOICES:3; }
-  // Enemy power level string for HUD
+  get enemyStartLevel(){
+    if(this.isSandbox) return this.sb.enemyStartLevel??1;
+    return this.isChaos ? 1 : 5;
+  }
+  get bossBaseHp(){ return BOSS_HP_BASE*(this.level/10)*(this.isChaos?1.5:1); }
+  get upgradeChoiceCount(){ return this.isChaos ? CHAOS_UPGRADE_CHOICES : 3; }
   get enemyPowerLabel(){
-    const t=this.chaosTier;
-    const extra=[];
-    if((this.enemyStats.chaosHpBonus||0)>0) extra.push(`+${this.enemyStats.chaosHpBonus}HP`);
-    if((this.enemyStats.chaosMovBonus||0)>0) extra.push(`+${Math.round(this.enemyStats.chaosMovBonus*100)}%MOV`);
-    if((this.enemyStats.chaosShotBonus||0)>0) extra.push(`+${Math.round(this.enemyStats.chaosShotBonus*100)}%ATK`);
+    const t=this.chaosTier, extra=[];
+    if((this.enemyStats.chaosHpBonus||0)>0)    extra.push(`+${this.enemyStats.chaosHpBonus}HP`);
+    if((this.enemyStats.chaosMovBonus||0)>0)   extra.push(`+${Math.round(this.enemyStats.chaosMovBonus*100)}%MOV`);
+    if((this.enemyStats.chaosShotBonus||0)>0)  extra.push(`+${Math.round(this.enemyStats.chaosShotBonus*100)}%ATK`);
     if((this.enemyStats.chaosSpawnBonus||0)>0) extra.push(`+${this.enemyStats.chaosSpawnBonus}SPAWN`);
     return `T${t}${extra.length?' ['+extra.join(' ')+']':''}`;
   }
@@ -235,7 +266,9 @@ class Game{
     this.grid    = Array.from({length:ROWS},()=>new Uint8Array(COLS));
     this.bullets = [];this.enemies=[];this.orbs=[];this.boss=null;
 
-    this.maxHp = 5+Math.floor((this.level-1)/2)+this.upgrades.extraHp;
+    this.maxHp = this.isSandbox
+      ? (this.sb.playerHp??5) + (this.upgrades.extraHp||0)
+      : 5+Math.floor((this.level-1)/2)+this.upgrades.extraHp;
     this.hp    = this.maxHp;
     this.score = 0;
     this.gameOver=false;this.paused=false;
@@ -270,13 +303,16 @@ class Game{
   _updateModeUI(){
     const modeEl=$('h-mode');
     if(modeEl){
-      modeEl.textContent=this.isChaos?'CHAOS':'NORMAL';
-      modeEl.className='pill-val'+(this.isChaos?' chaos-mode':'');
+      const label = this.isChaos?'CHAOS':this.isSandbox?'SANDBOX':'NORMAL';
+      modeEl.textContent=label;
+      modeEl.className='pill-val'+(this.isChaos?' chaos-mode':this.isSandbox?' sandbox-mode':'');
     }
-    // Show/hide roll skill
     const spR=$('sp-r'),hintR=$('hint-roll');
-    if(spR) spR.style.display=this.isChaos?'none':'flex';
-    if(hintR) hintR.style.display=this.isChaos?'none':'inline';
+    const hideRoll = this.isChaos||this.isSandbox;
+    if(spR)  spR.style.display=hideRoll?'none':'flex';
+    if(hintR) hintR.style.display=hideRoll?'none':'inline';
+    const cpPill=$('chaos-power-pill');
+    if(cpPill) cpPill.style.display=this.isChaos?'flex':'none';
   }
 
   // ── Oil ──────────────────────────────────────────
@@ -304,6 +340,7 @@ class Game{
   // ── Enemies ──────────────────────────────────────
   _spawnEnemies(){
     this.enemies=[];this.boss=null;
+    if(this.isSandbox && this.sb.noEnemies) return;
     if(this.level%10===0){
       const hp=Math.round(this.bossBaseHp);
       this.boss={r:rand(15,ROWS-15-BOSS_CELLS),c:rand(15,COLS-15-BOSS_CELLS),
@@ -311,12 +348,11 @@ class Game{
       return;
     }
     if(this.level<this.enemyStartLevel) return;
-    // Base enemy count
     let n = this.level===this.enemyStartLevel
       ? 1
       : Math.max(1, Math.floor((this.level-this.enemyStartLevel+1)/2) + (this.isChaos?1:0));
-    // Barter spawn bonus
     n += (this.isChaos ? (this.enemyStats.chaosSpawnBonus||0) : 0);
+    if(this.isSandbox) n = Math.max(0, Math.round(n * (this.sb.enemySpawnMult??1)));
     const ehp=this.enemyBaseHp;
     for(let i=0;i<n;i++)
       this.enemies.push({r:rand(8,ROWS-8-ENEMY_CELLS),c:rand(8,COLS-8-ENEMY_CELLS),
@@ -433,18 +469,20 @@ class Game{
     if(!this.enemies.length||this.gameOver||this.paused) return;
     if(now-this.lastEShotMs<this.enemyShootInterval) return;
     this.lastEShotMs=now;
+    // Enemy bullet speed fixed at 0.77 (= 1.1 × 0.7), NOT affected by player upgrades
+    const esp = this._sandboxEnemyBspeed ?? 0.77;
     for(const e of this.enemies){
       const dR=this.pr-e.r,dC=this.pc-e.c;
       let dr=0,dc=0;
       if(Math.abs(dR)>=Math.abs(dC))dr=Math.sign(dR);else dc=Math.sign(dC);
       if(!dr&&!dc)dr=1;
-      this.bullets.push(new Bullet(e.r+Math.floor(ENEMY_CELLS/2),e.c+Math.floor(ENEMY_CELLS/2),dr,dc,false,1.1));
-      // Chaos level 5+: spread shots
+      this.bullets.push(new Bullet(e.r+Math.floor(ENEMY_CELLS/2),e.c+Math.floor(ENEMY_CELLS/2),dr,dc,false,esp));
+      // Chaos level 5+: 2 extra spread bullets only (never triple)
       if(this.isChaos&&this.level>=5){
         const ang=Math.atan2(dR,dC);
         for(const da of[-0.25,0.25])
           this.bullets.push(new Bullet(e.r+Math.floor(ENEMY_CELLS/2),e.c+Math.floor(ENEMY_CELLS/2),
-            Math.sin(ang+da),Math.cos(ang+da),false,1.0));
+            Math.sin(ang+da),Math.cos(ang+da),false,esp*0.9));
       }
     }
   }
@@ -497,8 +535,11 @@ class Game{
         }
       } else {
         if(r>=this.pr&&r<this.pr+PLAYER_CELLS&&c>=this.pc&&c<this.pc+PLAYER_CELLS){
-          b.alive=false;this.hp--;this._flashDmg();
-          if(this.hp<=0){this.hp=0;this.gameOver=true;}
+          b.alive=false;
+          if(!(this.isSandbox && this.sb.godMode)){
+            this.hp--;this._flashDmg();
+            if(this.hp<=0){this.hp=0;this.gameOver=true;}
+          }
         }
       }
     }
@@ -586,6 +627,7 @@ class Game{
   // ── Time ─────────────────────────────────────────
   _updateTime(now){
     if(this.gameOver||this.paused)return;
+    if(this.isSandbox && this.sb.infiniteTime) return;
     this.timeLeft=Math.max(0,this.totalTime-(now-this.startMs)/1000);
     if(this.timeLeft<=0)this.gameOver=true;
   }
@@ -1205,7 +1247,7 @@ class Game{
     $('ov-title').textContent='GAME OVER';
     $('ov-score').textContent=this.score;
     $('ov-lvl').textContent=this.level;
-    $('ov-mode').textContent=this.isChaos?'CHAOS':'NORMAL';
+    $('ov-mode').textContent=this.mode==='chaos'?'CHAOS':this.mode==='sandbox'?'SANDBOX':'NORMAL';
     $('overlay').classList.remove('hidden');
   }
   restart(){
@@ -1213,18 +1255,16 @@ class Game{
     $('upgrade-overlay').classList.add('hidden');
     $('barter-overlay').classList.add('hidden');
     for(const k of Object.keys(this.upgrades))this.upgrades[k]=0;
-    // Reset chaos enemy scaling
-    this.enemyStats = {
-      chaosHpBonus:0, chaosMovBonus:0, chaosShotBonus:0,
-      chaosSpawnBonus:0, chaosSpreadBonus:0
-    };
+    this.enemyStats={chaosHpBonus:0,chaosMovBonus:0,chaosShotBonus:0,chaosSpawnBonus:0,chaosSpreadBonus:0};
     this.level=1;this._init();
   }
   backToMenu(){
     $('overlay').classList.add('hidden');
     $('upgrade-overlay').classList.add('hidden');
+    $('barter-overlay')?.classList.add('hidden');
     $('game-ui').classList.add('hidden');
     $('mode-select').classList.remove('hidden');
+    $('sandbox-screen')?.classList.add('hidden');
     window._game=null;
   }
 
@@ -1294,12 +1334,64 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
   window.addEventListener('resize',fitCanvas);
 
-  function startGame(mode){
+  window._startGame = function(mode, sbCfg=null){
     $('mode-select').classList.add('hidden');
+    $('sandbox-screen').classList.add('hidden');
     $('game-ui').classList.remove('hidden');
-    setTimeout(()=>{fitCanvas();window._game=new Game(mode);},50);
-  }
+    setTimeout(()=>{fitCanvas();window._game=new Game(mode,sbCfg);},50);
+  };
 
-  $('btn-normal').addEventListener('click',()=>startGame('normal'));
-  $('btn-chaos').addEventListener('click',()=>startGame('chaos'));
+  $('btn-normal').addEventListener('click',()=>window._startGame('normal'));
+  $('btn-chaos').addEventListener('click', ()=>window._startGame('chaos'));
+  $('btn-sandbox').addEventListener('click',()=>{
+    $('mode-select').classList.add('hidden');
+    $('sandbox-screen').classList.remove('hidden');
+  });
+  $('btn-sandbox-back').addEventListener('click',()=>{
+    $('sandbox-screen').classList.add('hidden');
+    $('mode-select').classList.remove('hidden');
+  });
+  $('btn-sandbox-start').addEventListener('click',()=>window._startGame('sandbox', readSandboxCfg()));
+
+  // Sync slider display values
+  document.querySelectorAll('.sb-slider').forEach(sl=>{
+    const vEl=$('sb-val-'+sl.id.replace('sb-',''));
+    const update=()=>{ if(vEl) vEl.textContent=sl.value; };
+    update(); sl.addEventListener('input',update);
+  });
+  // Sync checkbox ON/OFF labels
+  document.querySelectorAll('.sb-check').forEach(cb=>{
+    const lbl=$('sb-cval-'+cb.id.replace('sb-',''));
+    const sync=()=>{ if(lbl){ lbl.textContent=cb.checked?'ON':'OFF'; lbl.style.color=cb.checked?'#22ff88':'#ff4444'; } };
+    sync(); cb.addEventListener('change',sync);
+  });
 });
+
+function readSandboxCfg(){
+  const gv=id=>parseFloat(document.getElementById(id)?.value??0);
+  const gc=id=>document.getElementById(id)?.checked??false;
+  return {
+    playerHp:        +gv('sb-player-hp'),
+    playerSpeed:      +gv('sb-player-speed'),
+    playerBulletSpeed:+gv('sb-player-bspeed'),
+    playerShootCd:    +gv('sb-player-shootcd'),
+    doubleShot:       gc('sb-double'),
+    tripleShot:       gc('sb-triple'),
+    rapidFire:        +gv('sb-rapid')|0,
+    extraHp:          +gv('sb-extra-hp')|0,
+    areaCooldown:     +gv('sb-area-cd'),
+    areaRadius:       +gv('sb-area-rad')|0,
+    boostCooldown:    +gv('sb-boost-cd'),
+    boostDuration:    +gv('sb-boost-dur'),
+    enemyHp:          +gv('sb-enemy-hp')|0,
+    enemySpeed:       +gv('sb-enemy-speed'),
+    enemyFireRate:    +gv('sb-enemy-firerate'),
+    enemyBulletSpeed: +gv('sb-enemy-bspeed'),
+    enemyStartLevel:  +gv('sb-enemy-start')|0,
+    enemySpawnMult:   +gv('sb-enemy-spawn'),
+    noEnemies:        gc('sb-no-enemies'),
+    oilSpread:        +gv('sb-oil-spread'),
+    infiniteTime:     gc('sb-inf-time'),
+    godMode:          gc('sb-god-mode'),
+  };
+}
