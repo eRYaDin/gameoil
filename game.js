@@ -20,11 +20,25 @@ const ENEMY_CELLS    = 6;
 const BOSS_CELLS     = 14;
 const BOSS_HP_BASE   = 20;
 
-// Normal mode enemy HP
-const ENEMY_HP_NORMAL = 3;
-// Chaos mode multiplier
-const CHAOS_ENEMY_HP_MULT = 2;   // enemy HP x2 in chaos
-const CHAOS_UPGRADE_CHOICES = 6; // show 6 cards instead of 3
+// Enemy base HP (both modes start at 3)
+const ENEMY_HP_BASE     = 3;
+// Chaos: enemy scales every 5 rounds
+const CHAOS_HP_PER_5    = 1;     // +1 HP every 5 rounds
+const CHAOS_MOV_PER_5   = 0.10;  // +10% move speed every 5 rounds
+const CHAOS_ATK_PER_5   = 0.10;  // +10% attack speed every 5 rounds
+// Chaos upgrade choices
+const CHAOS_UPGRADE_CHOICES = 6;
+// Barter: every 3 rounds in chaos
+const CHAOS_BARTER_EVERY = 3;
+
+// ─── BARTER PENALTY DATABASE ─────────────────────────
+const BARTER_PENALTIES = [
+  { id:'penHp',    name:'ARMOR UP',    icon:'🛡', desc:'Semua musuh +1 darah',           color:'#ff2255', apply:(es)=>{ es.chaosHpBonus=(es.chaosHpBonus||0)+1; } },
+  { id:'penMov',   name:'TURBO',       icon:'💨', desc:'Musuh gerak +15% lebih cepat',   color:'#ff8800', apply:(es)=>{ es.chaosMovBonus=(es.chaosMovBonus||0)+0.15; } },
+  { id:'penShot',  name:'RAPID FIRE',  icon:'🔫', desc:'Musuh tembak +20% lebih cepat',  color:'#ff4444', apply:(es)=>{ es.chaosShotBonus=(es.chaosShotBonus||0)+0.20; } },
+  { id:'penSpawn', name:'SWARM',       icon:'🐝', desc:'+1 musuh tambahan per ronde',     color:'#ffaa00', apply:(es)=>{ es.chaosSpawnBonus=(es.chaosSpawnBonus||0)+1; } },
+  { id:'penSpread',name:'OIL SURGE',   icon:'🌊', desc:'Oil menyebar +5% lebih cepat',   color:'#cc8800', apply:(es)=>{ es.chaosSpreadBonus=(es.chaosSpreadBonus||0)+0.05; } },
+];
 
 // ─── UPGRADE DATABASE ────────────────────────────────
 const UPGRADE_DB = [
@@ -110,12 +124,27 @@ class Game{
 
     // Roll skill state (Normal only)
     this.rollUsedMs  = -999999;
-    this.rollCd      = 20000;  // 20s cooldown
+    this.rollCd      = 20000;
     this.rollActive  = false;
 
     // Chaos bonus pending state
     this._chaosBonusPending = false;
     this._chaosBonusUpgrade = null;
+
+    // Chaos enemy scaling (accumulates via barter + periodic)
+    // These are the "enemy stats" object used by _spawnEnemies etc.
+    this.enemyStats = {
+      chaosHpBonus:     0,  // extra HP added via barter penalty
+      chaosMovBonus:    0,  // move speed multiplier bonus (0.1 = 10%)
+      chaosShotBonus:   0,  // attack speed multiplier bonus
+      chaosSpawnBonus:  0,  // extra enemies per wave
+      chaosSpreadBonus: 0,  // extra oil spread chance
+    };
+
+    // Barter state
+    this._barterPending        = false;
+    this._barterChosenUpgrade  = null;
+    this._barterChosenPenalty  = null;
 
     this._buildWaterSnap();
     this._bindInput();
@@ -130,18 +159,49 @@ class Game{
   get skillArea()  { return (10+Math.floor((this.level-1)/2)) + this.upgrades.areaExpansion*2 + this.upgrades.oilVacuum; }
   get skillVDur()  { return 3000 + this.upgrades.boostDuration*1000; }
   get skillVCd()   { return Math.max(5000, 15000 - this.upgrades.boostCooldown*2000); }
-  get spreadCh()   { return Math.max(0.01, BASE_SPREAD_CH - this.upgrades.slowSpread*0.02); }
+  get spreadCh()   {
+    const base = Math.max(0.01, BASE_SPREAD_CH - this.upgrades.slowSpread*0.02);
+    return this.isChaos ? Math.min(0.5, base + (this.enemyStats.chaosSpreadBonus||0)) : base;
+  }
   get bulletSpd()  { return 1.8 * (1 + this.upgrades.bulletSpeed*0.3); }
   get movDelay()   { return Math.max(10, Math.round(35 / (1 + this.upgrades.moveSpeed*0.15))); }
   get shootCd()    { return Math.max(80, 250 * (1 - this.upgrades.rapidFire*0.3)); }
-  // Enemy HP: Normal=3, Chaos=3*2=6, scales with level
-  get enemyBaseHp(){ const base=ENEMY_HP_NORMAL*(this.isChaos?CHAOS_ENEMY_HP_MULT:1);
-                     return base + Math.floor(this.level/3); }
-  get bossBaseHp() { return BOSS_HP_BASE*(this.level/10)*(this.isChaos?1.5:1); }
-  // Enemy spawn: Normal starts at 5, Chaos starts at 1
+
+  // ── Chaos enemy derived stats ────────────────────
+  // Periodic scaling tier (every 5 levels in chaos)
+  get chaosTier()      { return this.isChaos ? Math.floor((this.level-1)/5) : 0; }
+  // Enemy HP: base 3, +1 per tier, + barter bonus
+  get enemyBaseHp()    {
+    if(!this.isChaos) return ENEMY_HP_BASE + Math.floor((this.level-1)/5);
+    return ENEMY_HP_BASE + this.chaosTier*CHAOS_HP_PER_5 + (this.enemyStats.chaosHpBonus||0);
+  }
+  // Enemy move interval (ms lower = faster). Base 500ms, -10% per tier, - barter bonus
+  get enemyMoveInterval() {
+    const base = this.isChaos ? 500 : 500;
+    const tierBonus = this.chaosTier * CHAOS_MOV_PER_5;
+    const barterBonus = this.isChaos ? (this.enemyStats.chaosMovBonus||0) : 0;
+    return Math.max(80, Math.round(base / (1 + tierBonus + barterBonus)));
+  }
+  // Enemy shoot interval (ms). Base 1500/1000, -10% per tier
+  get enemyShootInterval() {
+    const base = this.isChaos ? 1000 : 1500;
+    const tierBonus = this.chaosTier * CHAOS_ATK_PER_5;
+    const barterBonus = this.isChaos ? (this.enemyStats.chaosShotBonus||0) : 0;
+    return Math.max(250, Math.round(base / (1 + tierBonus + barterBonus)));
+  }
+  get bossBaseHp()     { return BOSS_HP_BASE*(this.level/10)*(this.isChaos?1.5:1); }
   get enemyStartLevel(){ return this.isChaos?1:5; }
-  // Upgrade card count
   get upgradeChoiceCount(){ return this.isChaos?CHAOS_UPGRADE_CHOICES:3; }
+  // Enemy power level string for HUD
+  get enemyPowerLabel(){
+    const t=this.chaosTier;
+    const extra=[];
+    if((this.enemyStats.chaosHpBonus||0)>0) extra.push(`+${this.enemyStats.chaosHpBonus}HP`);
+    if((this.enemyStats.chaosMovBonus||0)>0) extra.push(`+${Math.round(this.enemyStats.chaosMovBonus*100)}%MOV`);
+    if((this.enemyStats.chaosShotBonus||0)>0) extra.push(`+${Math.round(this.enemyStats.chaosShotBonus*100)}%ATK`);
+    if((this.enemyStats.chaosSpawnBonus||0)>0) extra.push(`+${this.enemyStats.chaosSpawnBonus}SPAWN`);
+    return `T${t}${extra.length?' ['+extra.join(' ')+']':''}`;
+  }
 
   // ── Build water background ───────────────────────
   _buildWaterSnap(){
@@ -251,7 +311,12 @@ class Game{
       return;
     }
     if(this.level<this.enemyStartLevel) return;
-    const n=this.level===this.enemyStartLevel?1:Math.max(1,Math.floor((this.level-this.enemyStartLevel+1)/2)+(this.isChaos?1:0));
+    // Base enemy count
+    let n = this.level===this.enemyStartLevel
+      ? 1
+      : Math.max(1, Math.floor((this.level-this.enemyStartLevel+1)/2) + (this.isChaos?1:0));
+    // Barter spawn bonus
+    n += (this.isChaos ? (this.enemyStats.chaosSpawnBonus||0) : 0);
     const ehp=this.enemyBaseHp;
     for(let i=0;i<n;i++)
       this.enemies.push({r:rand(8,ROWS-8-ENEMY_CELLS),c:rand(8,COLS-8-ENEMY_CELLS),
@@ -272,6 +337,8 @@ class Game{
     $('btn-restart')?.addEventListener('click',()=>this.restart());
     $('btn-menu')?.addEventListener('click',()=>this.backToMenu());
     $('btn-chaos-claim')?.addEventListener('click',()=>this._claimChaosBonus());
+    $('barter-skip')?.addEventListener('click',()=>this._barterSkip());
+    $('barter-confirm')?.addEventListener('click',()=>this._barterConfirm());
   }
   _getDir(){
     if(this.keys.has('ArrowUp')  ||this.keys.has('w'))return[-1,0];
@@ -365,7 +432,7 @@ class Game{
   }
   _enemyShoot(now){
     if(!this.enemies.length||this.gameOver||this.paused) return;
-    if(now-this.lastEShotMs<(this.isChaos?1000:1500)) return;
+    if(now-this.lastEShotMs<this.enemyShootInterval) return;
     this.lastEShotMs=now;
     for(const e of this.enemies){
       const dR=this.pr-e.r,dC=this.pc-e.c;
@@ -373,7 +440,7 @@ class Game{
       if(Math.abs(dR)>=Math.abs(dC))dr=Math.sign(dR);else dc=Math.sign(dC);
       if(!dr&&!dc)dr=1;
       this.bullets.push(new Bullet(e.r+Math.floor(ENEMY_CELLS/2),e.c+Math.floor(ENEMY_CELLS/2),dr,dc,false,1.1));
-      // Chaos: enemies shoot spread
+      // Chaos level 5+: spread shots
       if(this.isChaos&&this.level>=5){
         const ang=Math.atan2(dR,dC);
         for(const da of[-0.25,0.25])
@@ -451,8 +518,7 @@ class Game{
   // ── Enemy update ─────────────────────────────────
   _updateEnemies(now){
     if(this.gameOver||this.paused)return;
-    const moveInterval=this.isChaos?350:500;
-    if(this.enemies.length&&now-this.enemyMoveMs>moveInterval){
+    if(this.enemies.length&&now-this.enemyMoveMs>this.enemyMoveInterval){
       this.enemyMoveMs=now;
       for(const e of this.enemies){
         const pr=e.r,pc=e.c;
@@ -499,13 +565,22 @@ class Game{
     this.startMs=performance.now();
     this._placeOil();
     this._spawnEnemies();
-    // Every level in chaos, every 2 levels in normal
-    const doUpgrade=this.isChaos ? true : (this.level>=2&&this.level%2===0);
-    if(doUpgrade){
-      this.paused=true;
-      this._showUpgradeMenu();
+
+    if(this.isChaos){
+      // Every 3 rounds: barter (takes priority over upgrade)
+      if(this.level%CHAOS_BARTER_EVERY===0){
+        this.paused=true;
+        this._showBarterMenu();
+      } else {
+        // Every other level: upgrade
+        this.paused=true;
+        this._showUpgradeMenu();
+      }
     } else {
-      showLevelFlash(this.level, this.isChaos);
+      // Normal: upgrade every 2 levels
+      const doUpgrade=this.level>=2&&this.level%2===0;
+      if(doUpgrade){this.paused=true;this._showUpgradeMenu();}
+      else showLevelFlash(this.level, false);
     }
   }
 
@@ -616,6 +691,126 @@ class Game{
     this._closeUpgradeMenu();
   }
 
+  // ══════════════════════════════════════════════════
+  //  BARTER SYSTEM (Chaos, every 3 rounds)
+  // ══════════════════════════════════════════════════
+  _showBarterMenu(){
+    this._barterChosenUpgrade = null;
+    this._barterChosenPenalty = null;
+
+    $('barter-round').textContent = this.level;
+    $('barter-overlay').classList.remove('hidden');
+
+    // Build upgrade choices (3 random)
+    const upgPool = this._getUpgradeChoices(3);
+    const upgContainer = $('barter-upgrade-cards');
+    upgContainer.innerHTML = '';
+    upgPool.forEach(u=>{
+      const cnt=this.upgrades[u.id];
+      const card=document.createElement('div');
+      card.className='barter-upg-card';
+      card.style.setProperty('--card-color',u.color);
+      card.innerHTML=`
+        <div style="font-size:18px">${u.icon}</div>
+        <div class="barter-opt-name" style="color:${u.color};font-size:7px">${u.name}${u.stackable&&cnt>0?` ×${cnt+1}`:''}</div>
+        <div class="barter-pen-desc">${u.desc}</div>
+      `;
+      card.addEventListener('click',()=>{
+        // Select this upgrade
+        upgContainer.querySelectorAll('.barter-upg-card').forEach(c=>c.classList.remove('selected'));
+        card.classList.add('selected');
+        this._barterChosenUpgrade = u;
+        // Unlock penalty cards
+        $('barter-penalty-cards').querySelectorAll('.barter-pen-card').forEach(c=>c.classList.add('active'));
+        this._checkBarterReady();
+      });
+      upgContainer.appendChild(card);
+    });
+
+    // Build penalty choices (3 random penalties)
+    const penPool = shuffle([...BARTER_PENALTIES]).slice(0,3);
+    const penContainer = $('barter-penalty-cards');
+    penContainer.innerHTML = '';
+
+    // Add confirm button if not already present
+    if(!$('barter-confirm')){
+      const btn=document.createElement('button');
+      btn.id='barter-confirm';btn.textContent='[ KONFIRMASI BARTER ]';
+      $('barter-box').appendChild(btn);
+      btn.addEventListener('click',()=>this._barterConfirm());
+    } else {
+      $('barter-confirm').style.display='none';
+    }
+
+    penPool.forEach(p=>{
+      const card=document.createElement('div');
+      card.className='barter-pen-card';
+      card.style.setProperty('--pen-color',p.color);
+      // Show current value
+      const es=this.enemyStats;
+      const curVal = this._getPenaltyCurrentStr(p.id, es);
+      card.innerHTML=`
+        <div style="font-size:18px">${p.icon}</div>
+        <div class="barter-pen-name">${p.name}</div>
+        <div class="barter-pen-desc">${p.desc}</div>
+        <div class="barter-pen-cur">${curVal}</div>
+      `;
+      card.addEventListener('click',()=>{
+        if(!this._barterChosenUpgrade) return;
+        penContainer.querySelectorAll('.barter-pen-card').forEach(c=>c.classList.remove('selected'));
+        card.classList.add('selected');
+        this._barterChosenPenalty = p;
+        this._checkBarterReady();
+      });
+      penContainer.appendChild(card);
+    });
+  }
+
+  _getPenaltyCurrentStr(id, es){
+    if(id==='penHp')    return `Saat ini: ${this.enemyBaseHp} HP → ${this.enemyBaseHp+1} HP`;
+    if(id==='penMov')   return `Saat ini: +${Math.round((es.chaosMovBonus||0)*100)}% → +${Math.round(((es.chaosMovBonus||0)+0.15)*100)}%`;
+    if(id==='penShot')  return `Saat ini: +${Math.round((es.chaosShotBonus||0)*100)}% → +${Math.round(((es.chaosShotBonus||0)+0.20)*100)}%`;
+    if(id==='penSpawn') return `Saat ini: +${es.chaosSpawnBonus||0} → +${(es.chaosSpawnBonus||0)+1}`;
+    if(id==='penSpread')return `Saat ini: +${Math.round((es.chaosSpreadBonus||0)*100)}% → +${Math.round(((es.chaosSpreadBonus||0)+0.05)*100)}%`;
+    return '';
+  }
+
+  _checkBarterReady(){
+    const btn=$('barter-confirm');
+    if(!btn) return;
+    if(this._barterChosenUpgrade && this._barterChosenPenalty){
+      btn.style.display='block';
+    }
+  }
+
+  _barterSkip(){
+    $('barter-overlay').classList.add('hidden');
+    this.paused=false;
+    this.startMs=performance.now();
+    showLevelFlash(this.level, true);
+    showToast('🛡 SKIP — Musuh tetap sama');
+    this._updateHUD();
+  }
+
+  _barterConfirm(){
+    if(!this._barterChosenUpgrade||!this._barterChosenPenalty) return;
+    // Apply upgrade
+    this._applyUpgrade(this._barterChosenUpgrade.id);
+    // Apply penalty
+    this._barterChosenPenalty.apply(this.enemyStats);
+    // Re-spawn enemies with new stats
+    this._spawnEnemies();
+    $('barter-overlay').classList.add('hidden');
+    $('barter-confirm').style.display='none';
+    this._barterChosenUpgrade=null;
+    this._barterChosenPenalty=null;
+    this.paused=false;
+    this.startMs=performance.now();
+    showLevelFlash(this.level, true);
+    showToast(`⚔ BARTER! Musuh makin kuat!`);
+    this._updateHUD();
+  }
+
   _closeUpgradeMenu(){
     $('upgrade-overlay').classList.add('hidden');
     this.paused=false;
@@ -678,7 +873,13 @@ class Game{
       if(lR)lR.textContent=cdR<=0?'ROLL READY!': `ROLL ${Math.ceil(cdR/1000)}s`;
     }
 
-    // Boss bar
+    // Chaos enemy power pill
+    const cpPill=$('chaos-power-pill');
+    const cpVal=$('h-enemy-pwr');
+    if(cpPill){
+      cpPill.style.display=this.isChaos?'flex':'none';
+      if(cpVal) cpVal.textContent=this.enemyPowerLabel;
+    }
     const bw=$('boss-hp-wrap');
     if(bw){
       bw.style.display=this.boss?'flex':'none';
@@ -1000,7 +1201,13 @@ class Game{
   restart(){
     $('overlay').classList.add('hidden');
     $('upgrade-overlay').classList.add('hidden');
+    $('barter-overlay').classList.add('hidden');
     for(const k of Object.keys(this.upgrades))this.upgrades[k]=0;
+    // Reset chaos enemy scaling
+    this.enemyStats = {
+      chaosHpBonus:0, chaosMovBonus:0, chaosShotBonus:0,
+      chaosSpawnBonus:0, chaosSpreadBonus:0
+    };
     this.level=1;this._init();
   }
   backToMenu(){
