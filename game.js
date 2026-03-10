@@ -170,9 +170,9 @@ class Game{
   // ── Chaos enemy derived stats ────────────────────
   // Periodic scaling tier (every 5 levels in chaos)
   get chaosTier()      { return this.isChaos ? Math.floor((this.level-1)/5) : 0; }
-  // Enemy HP: base 3, +1 per tier, + barter bonus
+  // Enemy HP: both modes base = 3 flat; chaos adds tier scaling + barter bonus on top
   get enemyBaseHp()    {
-    if(!this.isChaos) return ENEMY_HP_BASE + Math.floor((this.level-1)/5);
+    if(!this.isChaos) return ENEMY_HP_BASE;  // Normal: always 3, no scaling
     return ENEMY_HP_BASE + this.chaosTier*CHAOS_HP_PER_5 + (this.enemyStats.chaosHpBonus||0);
   }
   // Enemy move interval (ms lower = faster). Base 500ms, -10% per tier, - barter bonus
@@ -337,7 +337,6 @@ class Game{
     $('btn-restart')?.addEventListener('click',()=>this.restart());
     $('btn-menu')?.addEventListener('click',()=>this.backToMenu());
     $('btn-chaos-claim')?.addEventListener('click',()=>this._claimChaosBonus());
-    $('barter-skip')?.addEventListener('click',()=>this._barterSkip());
     $('barter-confirm')?.addEventListener('click',()=>this._barterConfirm());
   }
   _getDir(){
@@ -699,88 +698,99 @@ class Game{
     this._barterChosenPenalty = null;
 
     $('barter-round').textContent = this.level;
-    $('barter-overlay').classList.remove('hidden');
 
-    // Build upgrade choices (3 random)
+    // Reset to step 0
+    $('barter-step-0').classList.remove('hidden');
+    $('barter-step-1').classList.add('hidden');
+    $('barter-step-2').classList.add('hidden');
+    const confirmBtn = $('barter-confirm');
+    if(confirmBtn) confirmBtn.style.display='none';
+
+    // Wire step-0 buttons (re-assign each time to avoid duplicate listeners)
+    const skipBtn  = $('barter-do-skip');
+    const takeBtn  = $('barter-do-take');
+    const newSkip  = skipBtn.cloneNode(true);
+    const newTake  = takeBtn.cloneNode(true);
+    skipBtn.parentNode.replaceChild(newSkip, skipBtn);
+    takeBtn.parentNode.replaceChild(newTake, takeBtn);
+
+    newSkip.addEventListener('click', ()=> this._barterSkip());
+    newTake.addEventListener('click', ()=> this._barterShowStep1());
+
+    $('barter-overlay').classList.remove('hidden');
+  }
+
+  _barterShowStep1(){
+    $('barter-step-0').classList.add('hidden');
+    $('barter-step-1').classList.remove('hidden');
+
     const upgPool = this._getUpgradeChoices(3);
     const upgContainer = $('barter-upgrade-cards');
     upgContainer.innerHTML = '';
+
+    if(!upgPool.length){
+      // No upgrades available — auto-skip
+      this._barterSkip(); return;
+    }
+
     upgPool.forEach(u=>{
-      const cnt=this.upgrades[u.id];
-      const card=document.createElement('div');
-      card.className='barter-upg-card';
-      card.style.setProperty('--card-color',u.color);
-      card.innerHTML=`
-        <div style="font-size:18px">${u.icon}</div>
-        <div class="barter-opt-name" style="color:${u.color};font-size:7px">${u.name}${u.stackable&&cnt>0?` ×${cnt+1}`:''}</div>
-        <div class="barter-pen-desc">${u.desc}</div>
+      const cnt = this.upgrades[u.id];
+      const card = document.createElement('div');
+      card.className = 'barter-upg-card';
+      card.style.setProperty('--card-color', u.color);
+      card.innerHTML = `
+        <div class="upg-icon">${u.icon}</div>
+        <div class="upg-name" style="font-size:8px">${u.name}${u.stackable&&cnt>0?`<span class="upg-stack">×${cnt+1}</span>`:''}</div>
+        <div class="upg-desc">${u.desc}</div>
+        ${u.stackable?'<div class="upg-tag">STACKABLE</div>':'<div class="upg-tag one">1×</div>'}
       `;
-      card.addEventListener('click',()=>{
-        // Select this upgrade
+      card.addEventListener('click', ()=>{
         upgContainer.querySelectorAll('.barter-upg-card').forEach(c=>c.classList.remove('selected'));
         card.classList.add('selected');
         this._barterChosenUpgrade = u;
-        // Unlock penalty cards
-        $('barter-penalty-cards').querySelectorAll('.barter-pen-card').forEach(c=>c.classList.add('active'));
-        this._checkBarterReady();
+        this._barterShowStep2();
       });
       upgContainer.appendChild(card);
     });
+  }
 
-    // Build penalty choices (3 random penalties)
+  _barterShowStep2(){
+    $('barter-step-2').classList.remove('hidden');
+
     const penPool = shuffle([...BARTER_PENALTIES]).slice(0,3);
     const penContainer = $('barter-penalty-cards');
     penContainer.innerHTML = '';
 
-    // Add confirm button if not already present
-    if(!$('barter-confirm')){
-      const btn=document.createElement('button');
-      btn.id='barter-confirm';btn.textContent='[ KONFIRMASI BARTER ]';
-      $('barter-box').appendChild(btn);
-      btn.addEventListener('click',()=>this._barterConfirm());
-    } else {
-      $('barter-confirm').style.display='none';
-    }
-
     penPool.forEach(p=>{
-      const card=document.createElement('div');
-      card.className='barter-pen-card';
-      card.style.setProperty('--pen-color',p.color);
-      // Show current value
-      const es=this.enemyStats;
-      const curVal = this._getPenaltyCurrentStr(p.id, es);
-      card.innerHTML=`
-        <div style="font-size:18px">${p.icon}</div>
+      const card = document.createElement('div');
+      card.className = 'barter-pen-card';
+      card.style.setProperty('--pen-color', p.color);
+      const curVal = this._getPenaltyCurrentStr(p.id);
+      card.innerHTML = `
+        <div class="upg-icon">${p.icon}</div>
         <div class="barter-pen-name">${p.name}</div>
         <div class="barter-pen-desc">${p.desc}</div>
         <div class="barter-pen-cur">${curVal}</div>
       `;
-      card.addEventListener('click',()=>{
-        if(!this._barterChosenUpgrade) return;
+      card.addEventListener('click', ()=>{
         penContainer.querySelectorAll('.barter-pen-card').forEach(c=>c.classList.remove('selected'));
         card.classList.add('selected');
         this._barterChosenPenalty = p;
-        this._checkBarterReady();
+        const btn = $('barter-confirm');
+        if(btn) btn.style.display = 'block';
       });
       penContainer.appendChild(card);
     });
   }
 
-  _getPenaltyCurrentStr(id, es){
-    if(id==='penHp')    return `Saat ini: ${this.enemyBaseHp} HP → ${this.enemyBaseHp+1} HP`;
-    if(id==='penMov')   return `Saat ini: +${Math.round((es.chaosMovBonus||0)*100)}% → +${Math.round(((es.chaosMovBonus||0)+0.15)*100)}%`;
-    if(id==='penShot')  return `Saat ini: +${Math.round((es.chaosShotBonus||0)*100)}% → +${Math.round(((es.chaosShotBonus||0)+0.20)*100)}%`;
-    if(id==='penSpawn') return `Saat ini: +${es.chaosSpawnBonus||0} → +${(es.chaosSpawnBonus||0)+1}`;
-    if(id==='penSpread')return `Saat ini: +${Math.round((es.chaosSpreadBonus||0)*100)}% → +${Math.round(((es.chaosSpreadBonus||0)+0.05)*100)}%`;
+  _getPenaltyCurrentStr(id){
+    const es = this.enemyStats;
+    if(id==='penHp')    return `HP musuh: ${this.enemyBaseHp} → ${this.enemyBaseHp+1}`;
+    if(id==='penMov')   return `Mov bonus: +${Math.round((es.chaosMovBonus||0)*100)}% → +${Math.round(((es.chaosMovBonus||0)+0.15)*100)}%`;
+    if(id==='penShot')  return `Atk bonus: +${Math.round((es.chaosShotBonus||0)*100)}% → +${Math.round(((es.chaosShotBonus||0)+0.20)*100)}%`;
+    if(id==='penSpawn') return `Spawn bonus: +${es.chaosSpawnBonus||0} → +${(es.chaosSpawnBonus||0)+1}`;
+    if(id==='penSpread')return `Oil spread: +${Math.round((es.chaosSpreadBonus||0)*100)}% → +${Math.round(((es.chaosSpreadBonus||0)+0.05)*100)}%`;
     return '';
-  }
-
-  _checkBarterReady(){
-    const btn=$('barter-confirm');
-    if(!btn) return;
-    if(this._barterChosenUpgrade && this._barterChosenPenalty){
-      btn.style.display='block';
-    }
   }
 
   _barterSkip(){
@@ -794,20 +804,20 @@ class Game{
 
   _barterConfirm(){
     if(!this._barterChosenUpgrade||!this._barterChosenPenalty) return;
-    // Apply upgrade
     this._applyUpgrade(this._barterChosenUpgrade.id);
-    // Apply penalty
     this._barterChosenPenalty.apply(this.enemyStats);
-    // Re-spawn enemies with new stats
-    this._spawnEnemies();
+    // Re-spawn current level enemies with updated stats
+    if(this.level>=this.enemyStartLevel && this.level%10!==0){
+      const ehp=this.enemyBaseHp;
+      this.enemies.forEach(e=>{e.maxHp=ehp; e.hp=Math.min(e.hp,ehp);});
+    }
     $('barter-overlay').classList.add('hidden');
-    $('barter-confirm').style.display='none';
     this._barterChosenUpgrade=null;
     this._barterChosenPenalty=null;
     this.paused=false;
     this.startMs=performance.now();
     showLevelFlash(this.level, true);
-    showToast(`⚔ BARTER! Musuh makin kuat!`);
+    showToast('⚔ BARTER! Musuh makin kuat!');
     this._updateHUD();
   }
 
