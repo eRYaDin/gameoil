@@ -33,10 +33,10 @@
           <div class="mode-icon">💥</div>
           <div class="mode-name" style="color:#ff2255">CHAOS</div>
           <ul class="mode-desc">
-            <li>Musuh spawn dari level 1</li>
-            <li>Musuh HP tebal (x2)</li>
-            <li>PILIH 1 + 1 BONUS RANDOM</li>
-            <li>Upgrade dikali 2 (6 pilihan)</li>
+            <li>Musuh dari level 1, darah 3</li>
+            <li>Tiap 5 ronde musuh makin kuat</li>
+            <li>Tiap ronde: PILIH 1 + 1 BONUS</li>
+            <li>Tiap 3 ronde: BARTER tersedia</li>
           </ul>
           <div class="mode-tag" style="border-color:#ff2255;color:#ff2255">HARDCORE</div>
         </div>
@@ -68,6 +68,11 @@
         <span class="pill-label">MODE</span>
         <span class="pill-val" id="h-mode">NORMAL</span>
       </div>
+      <!-- Chaos enemy power indicator -->
+      <div class="hud-pill" id="chaos-power-pill" style="display:none">
+        <span class="pill-label">ENEMY PWR</span>
+        <span class="pill-val" id="h-enemy-pwr" style="color:#ff8c00">Lv1</span>
+      </div>
       <div class="hud-pill">
         <span class="pill-label">HP</span>
         <div id="h-hp"></div>
@@ -88,14 +93,14 @@
       <div class="skill-pill" id="sp-c">
         <span class="sp-key">[C]</span>
         <div class="sp-body">
-          <div class="sp-label" id="skill-label">AREA CLEAR — READY!</div>
+          <div class="sp-label" id="skill-label">AREA CLEAR</div>
           <div class="sp-bar-bg"><div class="sp-bar" id="skill-bar"></div></div>
         </div>
       </div>
       <div class="skill-pill" id="sp-v">
         <span class="sp-key">[V]</span>
         <div class="sp-body">
-          <div class="sp-label" id="skill-label-v">SPEED BOOST — READY!</div>
+          <div class="sp-label" id="skill-label-v">SPEED BOOST</div>
           <div class="sp-bar-bg"><div class="sp-bar green" id="skill-bar-v"></div></div>
         </div>
       </div>
@@ -112,11 +117,11 @@
       </div>
     </footer>
 
-    <!-- UPGRADE OVERLAY -->
+    <!-- ══ UPGRADE OVERLAY ══ -->
     <div id="upgrade-overlay" class="hidden">
       <div id="upgrade-box">
         <div id="upgrade-title" class="px-title">UPGRADE!</div>
-        <div id="upgrade-sub">PILIH 1 PERK — GAME PAUSE</div>
+        <div id="upgrade-sub">PILIH 1 PERK</div>
         <div id="upgrade-cards"></div>
         <div id="chaos-bonus-wrap" class="hidden">
           <div class="chaos-bonus-label">⚡ CHAOS BONUS — UPGRADE GRATIS!</div>
@@ -126,7 +131,34 @@
       </div>
     </div>
 
-    <!-- GAME OVER -->
+    <!-- ══ BARTER OVERLAY (Chaos every 3 rounds) ══ -->
+    <div id="barter-overlay" class="hidden">
+      <div id="barter-box">
+        <div class="px-title barter-title">⚔ BARTER ⚔</div>
+        <div id="barter-sub">RONDE <span id="barter-round">3</span> — PILIH JALAN MU</div>
+        <div class="barter-warning">Musuh akan MAKIN KUAT jika kamu ambil upgrade!</div>
+        <div id="barter-cards-wrap">
+          <!-- Left: Skip -->
+          <div id="barter-skip" class="barter-option skip-option">
+            <div class="barter-opt-icon">🛡</div>
+            <div class="barter-opt-name">SKIP</div>
+            <div class="barter-opt-desc">Tidak dapat upgrade.<br>Musuh tetap sama.</div>
+            <div class="barter-opt-tag" style="border-color:#22ff88;color:#22ff88">AMAN</div>
+          </div>
+          <!-- Right: Upgrade choices with enemy penalty selector -->
+          <div id="barter-right">
+            <div class="barter-right-header">AMBIL UPGRADE →</div>
+            <div class="barter-sub-label">Pilih 1 upgrade yang kamu mau:</div>
+            <div id="barter-upgrade-cards"></div>
+            <div class="barter-divider">⬇ TAPI musuh mendapat buff:</div>
+            <div class="barter-sub-label">Pilih 1 buff untuk musuh:</div>
+            <div id="barter-penalty-cards"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ GAME OVER ══ -->
     <div id="overlay" class="hidden">
       <div id="ov-box">
         <div id="ov-title" class="px-title">GAME OVER</div>
@@ -141,8 +173,7 @@
     </div>
 
     <div id="lvl-flash" class="hidden">LEVEL UP!</div>
-
-  </div><!-- #game-ui -->
+  </div>
 </div>
 <script src="game.js"></script>
 </body>
