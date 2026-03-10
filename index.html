@@ -135,25 +135,37 @@
     <div id="barter-overlay" class="hidden">
       <div id="barter-box">
         <div class="px-title barter-title">⚔ BARTER ⚔</div>
-        <div id="barter-sub">RONDE <span id="barter-round">3</span> — PILIH JALAN MU</div>
-        <div class="barter-warning">Musuh akan MAKIN KUAT jika kamu ambil upgrade!</div>
-        <div id="barter-cards-wrap">
-          <!-- Left: Skip -->
-          <div id="barter-skip" class="barter-option skip-option">
-            <div class="barter-opt-icon">🛡</div>
-            <div class="barter-opt-name">SKIP</div>
-            <div class="barter-opt-desc">Tidak dapat upgrade.<br>Musuh tetap sama.</div>
-            <div class="barter-opt-tag" style="border-color:#22ff88;color:#22ff88">AMAN</div>
+        <div id="barter-sub">RONDE <span id="barter-round">3</span> — MUSUH MAKIN KUAT JIKA KAMU AMBIL UPGRADE</div>
+
+        <!-- Step 0: choose skip or proceed -->
+        <div id="barter-step-0">
+          <div class="barter-two-btn">
+            <div class="barter-big-btn" id="barter-do-skip" style="--bc:#22ff88">
+              <div style="font-size:28px">🛡</div>
+              <div style="font-size:10px;color:#22ff88;letter-spacing:2px">SKIP</div>
+              <div style="font-size:7px;color:#aabbcc;line-height:1.8">Tidak dapat upgrade<br>Musuh tetap sama</div>
+              <div class="barter-opt-tag" style="border-color:#22ff88;color:#22ff88">AMAN</div>
+            </div>
+            <div class="barter-big-btn" id="barter-do-take" style="--bc:#ff8c00">
+              <div style="font-size:28px">⚡</div>
+              <div style="font-size:10px;color:#ff8c00;letter-spacing:2px">AMBIL UPGRADE</div>
+              <div style="font-size:7px;color:#aabbcc;line-height:1.8">Pilih upgrade &amp; beri buff ke musuh</div>
+              <div class="barter-opt-tag" style="border-color:#ff8c00;color:#ff8c00">BERISIKO</div>
+            </div>
           </div>
-          <!-- Right: Upgrade choices with enemy penalty selector -->
-          <div id="barter-right">
-            <div class="barter-right-header">AMBIL UPGRADE →</div>
-            <div class="barter-sub-label">Pilih 1 upgrade yang kamu mau:</div>
-            <div id="barter-upgrade-cards"></div>
-            <div class="barter-divider">⬇ TAPI musuh mendapat buff:</div>
-            <div class="barter-sub-label">Pilih 1 buff untuk musuh:</div>
-            <div id="barter-penalty-cards"></div>
-          </div>
+        </div>
+
+        <!-- Step 1: pick your upgrade -->
+        <div id="barter-step-1" class="hidden">
+          <div class="barter-step-label">LANGKAH 1 — PILIH UPGRADE UNTUKMU:</div>
+          <div id="barter-upgrade-cards" class="barter-card-row"></div>
+        </div>
+
+        <!-- Step 2: pick enemy penalty -->
+        <div id="barter-step-2" class="hidden">
+          <div class="barter-step-label" style="color:#ff2255">LANGKAH 2 — PILIH BUFF UNTUK MUSUH:</div>
+          <div id="barter-penalty-cards" class="barter-card-row"></div>
+          <button id="barter-confirm" style="display:none">[ ✓ KONFIRMASI BARTER ]</button>
         </div>
       </div>
     </div>
