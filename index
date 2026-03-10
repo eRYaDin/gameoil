@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Oil Spill Cleanup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Teko:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div id="app">
+
+  <!-- TOP HUD -->
+  <header id="hud-top">
+    <div class="hud-group">
+      <div class="hud-item">
+        <div class="hud-label">LEVEL</div>
+        <div class="hud-val" id="h-level">1</div>
+      </div>
+      <div class="hud-sep"></div>
+      <div class="hud-item">
+        <div class="hud-label">SCORE</div>
+        <div class="hud-val accent" id="h-score">0</div>
+      </div>
+    </div>
+
+    <div class="hud-center">
+      <div class="timer-wrap">
+        <svg viewBox="0 0 56 56" width="56" height="56">
+          <circle cx="28" cy="28" r="24" class="ring-bg"/>
+          <circle cx="28" cy="28" r="24" class="ring-fg" id="timer-ring"/>
+        </svg>
+        <div id="h-time" class="timer-num">60</div>
+      </div>
+    </div>
+
+    <div class="hud-group">
+      <div class="hud-item">
+        <div class="hud-label">OIL</div>
+        <div class="hud-val warn" id="h-oil">0</div>
+      </div>
+      <div class="hud-sep"></div>
+      <div class="hud-item">
+        <div class="hud-label">HP</div>
+        <div id="h-hp" class="hp-row"></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- UPGRADE BADGES ROW -->
+  <div id="badge-row">
+    <div id="upgrade-badges"></div>
+  </div>
+
+  <!-- BOSS HP BAR -->
+  <div id="boss-hp-wrap" style="display:none">
+    <div id="boss-hp-label">⚠ BOSS</div>
+    <div id="boss-hp-track"><div id="boss-hp-bar"></div></div>
+    <div id="boss-hp-text"></div>
+  </div>
+
+  <!-- CANVAS -->
+  <div id="canvas-wrap">
+    <canvas id="gc"></canvas>
+    <div id="vignette"></div>
+  </div>
+
+  <!-- BOTTOM HUD -->
+  <footer id="hud-bot">
+    <div class="skill-wrap">
+      <div class="skill-icon" id="skill-icon">⚡</div>
+      <div class="skill-info">
+        <div class="skill-lbl" id="skill-label">[C] AREA CLEAR — READY</div>
+        <div class="skill-bar-outer"><div class="skill-bar" id="skill-bar"></div></div>
+      </div>
+    </div>
+    <div class="skill-wrap">
+      <div class="skill-icon" id="skill-icon-v">💨</div>
+      <div class="skill-info">
+        <div class="skill-lbl" id="skill-label-v">[V] SPEED BOOST — READY</div>
+        <div class="skill-bar-outer"><div class="skill-bar" id="skill-bar-v"></div></div>
+      </div>
+    </div>
+    <div id="controls">
+      <span>WASD <em>move</em></span>
+      <span>SPACE <em>shoot</em></span>
+      <span>[C] <em>area</em></span>
+      <span>[V] <em>boost</em></span>
+    </div>
+  </footer>
+
+  <!-- ══════════ UPGRADE OVERLAY ══════════ -->
+  <div id="upgrade-overlay" class="hidden">
+    <div id="upgrade-box">
+      <div id="upgrade-header">
+        <div id="upgrade-lvl-text">LEVEL 2 — PILIH UPGRADE</div>
+        <div id="upgrade-sub">Game dijeda · Pilih 1 dari 3 upgrade</div>
+      </div>
+      <div id="upgrade-cards"></div>
+    </div>
+  </div>
+
+  <!-- GAME OVER OVERLAY -->
+  <div id="overlay" class="hidden">
+    <div id="ov-box">
+      <div id="ov-title">GAME OVER</div>
+      <div class="ov-stat"><span class="ov-key">SCORE</span><span id="ov-score">0</span></div>
+      <div class="ov-stat"><span class="ov-key">LEVEL REACHED</span><span id="ov-lvl">1</span></div>
+      <button id="btn-restart">PLAY AGAIN &nbsp;[R]</button>
+    </div>
+  </div>
+
+  <!-- LEVEL FLASH -->
+  <div id="lvl-flash" class="hidden">LEVEL UP!</div>
+
+</div>
+<script src="game.js"></script>
+</body>
+</html>
